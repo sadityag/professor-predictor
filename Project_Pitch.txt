@@ -1,0 +1,18 @@
+The broad objective of this project is to answer:
+- Does the number of faculty hire across the US in postsecondary institutions increase/decrease with increasing economic indicators such as gdp per capita, median earning, etc...? 
+- If such a correlation exists, what's the model to predict the number of faculty positions offered in a given year? 
+- Is this prediction directly or inversely proportional to the offerings in industrial (non-academic) job market for this year? 
+
+ 
+
+Stakeholders:
+- Graduate students who are finishing their PhD degrees and postdocs looking for faculty positions. 
+- Academic institutions could predict their needs to faculty in a few years?  
+
+KPIs:
+
+Data sets will be obtained using two methods: 
+
+1- web scraping for faculty names from different institutions' websites and archives to create time series of the faculty hires per year. 
+
+2- ready data sets that can be found in FRED (for economic indicators), Integrated postsecondary education data system (IPEDS), and Education Data Explorer.   
