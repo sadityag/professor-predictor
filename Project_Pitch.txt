@@ -10,6 +10,10 @@ Stakeholders:
 - Academic institutions could predict their needs to faculty in a few years?  
 
 KPIs:
+-We will perform an F-test on our models to determine which of our economic indicators are truly necessary in our model.
+-If possible, we will divide our data into states. Partitions of data from different states will be used as testing and training data.
+-Finally, we will train our model on data using only data up to a given year in history and test our model by attempting to replicate the data from the next year.
+
 
 Data sets will be obtained using two methods: 
 
