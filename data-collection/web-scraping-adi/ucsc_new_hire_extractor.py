@@ -13,7 +13,7 @@ def get_soup(url):
     return BeautifulSoup(response.content, 'html.parser')
 
 def explore_disciplines(url):
-    driver = webdriver.Chrome()  # Make sure you have ChromeDriver installed
+    driver = webdriver.Chrome()
     driver.get(url)
     
     try:
