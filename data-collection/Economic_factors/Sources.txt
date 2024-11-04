@@ -1,0 +1,13 @@
+annual inflation rat: 
+
+file name: inflation_rate_annual_percent_1980_2024_annual
+source: https://www.imf.org/external/datamapper/PCPIPCH@WEO/USA?year=2024
+
+Federal Higher education funds: 
+file name: NSF_awards_2011-2023_by_award
+source:
+https://tableau.external.nsf.gov/views/NSFbyNumbers/Details?%3AisGuestRedirectFromVizportal=y&%3Aembed=y&%3Alinktarget=_blank&%3Atoolbar=top
+
+file name: Federal_budget_education_1980_2021_annual
+source:  
+https://www.ed.gov/about/ed-overview/annual-performance-reports/budget/us-department-of-education-budget-history
