@@ -6,30 +6,35 @@ import sklearn.linear_model as fit
 #@st.cache_data
 #function that gets input and output dataframes
 
+
 df = pd.DataFrame({
   'year': [2000, 2001, 2002, 2003,2004],
   'GDP': [69, 420, 421, 0,1],
-  "Chiefs Winning Percentage":[1,6,7,2,1],
+  "Chiefs Winning Percentage":[20,40,60,23,100],
   'Total Faculty': [69, 420, 429, 0,1],
   "New Faculty":[1,2,6,9,10]
 })
 
+df=pd.read_csv('../data-collection/data_interpolated.csv')
 
-option_Inputs = st.selectbox(
+option_inputs = st.selectbox(
     'Which input would you like to investigate?',
-     df.keys()[1:3])
+     df.keys())
 
-option_Outputs = st.selectbox(
+
+option_outputs = st.selectbox(
     'Which output would you like to investigate?',
-     df.keys()[3:5])
+     #df.keys()[1]
+    ["faculty"])
 
-'You chose to study the relationship between ', option_Inputs, ' and ', option_Outputs
+'You chose to study the relationship between ', option_inputs, ' and ', option_outputs
 st.divider()
 
-first_chart=st.line_chart(df,x='year',y=[option_Inputs,option_Outputs])
-st.scatter_chart(df,x=option_Inputs,y=option_Outputs)
+first_chart=st.line_chart(df,x='year',y=[option_inputs,option_outputs])
+st.scatter_chart(df,x=option_inputs,y=option_outputs)
 
-anal_tech=["linear Regression"]
+
+analysis_techiques=["linear Regression"]
 
 def LinReg(df, key_in,key_out):
     xvals=df[key_in]
