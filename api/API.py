@@ -31,6 +31,7 @@ option_outputs = st.selectbox(
 st.divider()
 
 first_chart=st.line_chart(df,x='year',y=[option_inputs,option_outputs])
+st.divider()
 st.scatter_chart(df,x=option_inputs,y=option_outputs)
 
 
