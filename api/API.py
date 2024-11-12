@@ -29,6 +29,7 @@ option_outputs = st.selectbox(
 
 'You chose to study the relationship between ', option_inputs, ' and ', option_outputs
 st.divider()
+st.divider()
 
 first_chart=st.line_chart(df,x='year',y=[option_inputs,option_outputs])
 st.divider()
