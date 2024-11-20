@@ -3,43 +3,40 @@ import numpy
 import pandas as pd
 import sklearn.linear_model as fit
 
-#@st.cache_data
-#function that gets input and output dataframes
+from importlib.machinery import SourceFileLoader
 
-
-df = pd.DataFrame({
-  'year': [2000, 2001, 2002, 2003,2004],
-  'GDP': [69, 420, 421, 0,1],
-  "Chiefs Winning Percentage":[20,40,60,23,100],
-  'Total Faculty': [69, 420, 429, 0,1],
-  "New Faculty":[1,2,6,9,10]
-})
+analysis = SourceFileLoader("analysis_line-regression_class", "../data-analysis/analysis-framework/analysis_line-regression_class.py").load_module()
 
 df=pd.read_csv('../data-collection/data_interpolated.csv')
+input_df=df.drop(columns=["Number of Faculty Positions"])
+output_df=df["Number of Faculty Positions"]
+
 
 option_inputs = st.selectbox(
     'Which input would you like to investigate?',
-     df.keys())
+     input_df.keys())
 
 
-option_outputs = st.selectbox(
-    'Which output would you like to investigate?',
-     #df.keys()[1]
-    ["faculty"])
-
+option_outputs = "Number of Faculty Positions"
 'You chose to study the relationship between ', option_inputs, ' and ', option_outputs
 st.divider()
-st.divider()
+if option_inputs!="Year":
+  first_chart=st.line_chart(df,x='Year',y=[option_inputs])
+  st.divider()
+  second_chart=st.line_chart(df,x='Year',y=[option_outputs])
+  st.divider()
+  st.scatter_chart(df,x=option_inputs,y=option_outputs)
+  st.divider()
+else:
+  first_chart=st.line_chart(df,x='Year',y=[option_outputs])
+  st.divider()
 
-first_chart=st.line_chart(df,x='year',y=[option_inputs,option_outputs])
-st.divider()
-st.scatter_chart(df,x=option_inputs,y=option_outputs)
 
+analysis_techiques=["Time Series Regression"]
+analysis_choice = st.selectbox(
+    'Which type of analysis would you like to perform?',
+     analysis_techiques)
 
-analysis_techiques=["linear Regression"]
-
-def LinReg(df, key_in,key_out):
-    xvals=df[key_in]
-    yvals=df[key_out]
-    reg=fit.LinearRegression(xvals,yvals)
-    return 
+if analysis_choice=="Time Series Regression":
+  out_dict=analysis.TimeSeriesRegression().linear_regression(input_df[option_inputs],output_df)
+  "This model predicts that there will be "+str(int(out_dict['prediction']))+" faculty positions in the year "+str(int(max(input_df[option_inputs])+1))+"."
