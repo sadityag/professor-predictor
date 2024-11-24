@@ -30,7 +30,7 @@ from scipy.stats import norm
 warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=ConvergenceWarning)
 
-class TimeSeriesRegression:
+class PredictiveRegression:
     def _calculate_metrics(self, y_true, y_pred, n_params=0):
         """
         Calculates standardized error metrics for model evaluation.
@@ -99,36 +99,35 @@ class TimeSeriesRegression:
     
     def clean_series(self, X, Y):
         """
-        Aligns two time series based on the first valid index.
+        Aligns two time series based on shared valid data points.
+        
         Inputs:
         X           : yearly time series data
         Y           : yearly time series data
+        
         Outputs:
         tuple       : (X_aligned, Y_aligned)
-        X_aligned   : time series data aligned based on first valid index
-        Y_aligned   : time series data aligned based on first valid index
         """
         if not isinstance(X, pd.Series):
             X = pd.Series(X)
         if not isinstance(Y, pd.Series):
             Y = pd.Series(Y)
-            
-        first_index = max(X.first_valid_index(), Y.first_valid_index())
-        last_index = min(X.last_valid_index(), Y.last_valid_index())
         
-        # Add check for valid index range
-        if first_index >= last_index:
-            raise ValueError("Insufficient overlapping data between X and Y series")
+        # Get overlapping indices where both series have valid data
+        valid_indices = X.notna() & Y.notna()
         
-        return X[first_index:last_index], Y[first_index:last_index]
+        # Return aligned series with only valid data points
+        return X[valid_indices], Y[valid_indices]
 
     def align_with_lag(self, X, Y, lag):
         """
         Aligns two time series based on a given lag value.
+        
         Inputs:
         X    : yearly time series data
         Y    : yearly time series data
         lag  : integer lag value to shift X backwards
+        
         Outputs:
         tuple: (X_aligned, Y_aligned) where X is shifted back by lag periods
         """
@@ -137,48 +136,55 @@ class TimeSeriesRegression:
         if not isinstance(Y, pd.Series):
             Y = pd.Series(Y)
         
-        y_start = Y.first_valid_index()
-        y_end = Y.last_valid_index()
+        # Create pairs of indices for alignment
+        Y_indices = Y[Y.notna()].index
+        X_indices = X[X.notna()].index
         
-        if y_start is None or y_end is None:
-            raise ValueError("Y series contains no valid data")
+        # Calculate lagged indices
+        Y_start, Y_end = Y_indices.min(), Y_indices.max()
+        X_start, X_end = X_indices.min() + lag, X_indices.max() + lag
         
-        x_start = y_start - lag
-        x_end = y_end - lag
+        # Find overlapping period
+        start_idx = max(Y_start, X_start)
+        end_idx = min(Y_end, X_end)
         
-        if x_start < X.first_valid_index() or x_end > X.last_valid_index():
-            raise ValueError(f"Insufficient X data for lag {lag}")
+        # If no overlap after lag, return empty series
+        if start_idx > end_idx:
+            return pd.Series(), pd.Series()
         
-        X_lagged = X.loc[x_start:x_end]
-        Y_aligned = Y.loc[y_start:y_end]
+        # Align the series
+        Y_aligned = Y.loc[start_idx:end_idx]
+        X_aligned = X.loc[start_idx-lag:end_idx-lag]
         
-        # Reset indices while preserving data integrity
-        X_aligned = X_lagged.reset_index(drop=True)
-        Y_aligned = Y_aligned.reset_index(drop=True)
-        
-        return X_aligned, Y_aligned
+        # Get only points where both series have valid data
+        valid_indices = X_aligned.notna() & Y_aligned.notna()
+        return X_aligned[valid_indices], Y_aligned[valid_indices]
 
     def max_lag(self, X, Y, max_lag_years=10):
         """
         Finds the lag that maximizes correlation between two time series.
+        
         Inputs:
         X             : yearly time series data
         Y             : yearly time series data
-        max_lag_years : optional integer that specifies 
-                        maximum number of years to check for lag
+        max_lag_years : maximum number of years to check for lag
+        
         Outputs:
         tuple           : (optimal_lag, max_correlation, metrics)
-        optimal_lag     : maximizes the correlation of the 2 series
-        max_correlation : the value of the correlation at optimal lag
-        metrics        : dictionary of evaluation metrics at optimal lag
+        optimal_lag     : lag that maximizes correlation
+        max_correlation : correlation value at optimal lag
+        metrics        : evaluation metrics at optimal lag
         """
         if max_lag_years < 0:
             raise ValueError("max_lag_years must be non-negative")
         
-        # Initial data cleaning
+        # Initial data cleaning to get valid data points
         X_clean, Y_clean = self.clean_series(X, Y)
         
-        # Convert to numpy arrays for efficient computation
+        if len(X_clean) < 2 or len(Y_clean) < 2:
+            raise ValueError("Insufficient valid data points in series")
+        
+        # Convert to numpy arrays for computation
         X_arr = np.array(X_clean)
         Y_arr = np.array(Y_clean)
         
@@ -186,28 +192,33 @@ class TimeSeriesRegression:
         X_norm = (X_arr - np.mean(X_arr)) / (np.std(X_arr) + 1e-10)
         Y_norm = (Y_arr - np.mean(Y_arr)) / (np.std(Y_arr) + 1e-10)
         
-        # Calculate cross-correlation
-        correlations = signal.correlate(Y_norm, X_norm, mode='full')
-        lags = signal.correlation_lags(len(X_norm), len(Y_norm))
+        # Try different lags and compute correlations
+        correlations = []
+        valid_lags = []
         
-        # Filter valid lags
-        valid_indices = (lags >= 0) & (lags <= max_lag_years)
-        valid_correlations = correlations[valid_indices]
-        valid_lags = lags[valid_indices]
+        for lag in range(max_lag_years + 1):
+            X_lagged, Y_aligned = self.align_with_lag(X_clean, Y_clean, lag)
+            if len(X_lagged) >= 2:  # Need at least 2 points for correlation
+                corr = np.corrcoef(X_lagged, Y_aligned)[0, 1]
+                if not np.isnan(corr):
+                    correlations.append(corr)
+                    valid_lags.append(lag)
         
-        if len(valid_correlations) == 0:
-            raise ValueError("No valid lags found within specified range")
+        if not correlations:
+            # If no valid correlations found, return lag 0
+            X_aligned, Y_aligned = self.clean_series(X, Y)
+            return 0, 0, self._calculate_metrics(Y_aligned, X_aligned, n_params=1)
         
         # Find optimal lag
-        max_corr_idx = np.argmax(valid_correlations)
-        optimal_lag = valid_lags[max_corr_idx]
-        max_correlation = valid_correlations[max_corr_idx] / len(X_arr)
+        best_idx = np.argmax(np.abs(correlations))
+        optimal_lag = valid_lags[best_idx]
+        max_correlation = correlations[best_idx]
         
         # Calculate metrics at optimal lag
         X_lagged, Y_aligned = self.align_with_lag(X, Y, optimal_lag)
         metrics = self._calculate_metrics(Y_aligned, X_lagged, n_params=1)
         
-        return optimal_lag, max_correlation, metrics
+        return optimal_lag, max_correlation, metrics 
 
     def _do_cross_validation(self, X, Y, model_func, params, k_folds=5):
         """
@@ -293,6 +304,129 @@ class TimeSeriesRegression:
             print(f"Error in cross-validation: {str(e)}")
             return np.nan, np.nan
     
+    def time_series_regression(self, X, Y, trend_method='linear', period=None, max_harmonics=3):
+        """
+        Decomposes time series into trend and cyclical components.
+        X: pd.Series or array of years
+        Y: pd.Series or array of values
+        """
+        if not isinstance(X, pd.Series):
+            X = pd.Series(X)
+        if not isinstance(Y, pd.Series):
+            Y = pd.Series(Y)
+        
+        X_clean, Y_clean = self.clean_series(X, Y)
+        
+        trend_results = self.trend_regression(X_clean, Y_clean, method=trend_method)
+        trend = trend_results['plot_data']['Y_pred']
+        detrended = Y_clean - trend
+        
+        cycle_results = self.cyclicality_analysis(detrended, X_clean, period, max_harmonics)
+        
+        last_year = X_clean.max()
+        if last_year < 2024:
+            future_value = trend_results['prediction'] + cycle_results['prediction']
+        else:
+            future_value = None
+        
+        return {
+            'trend': pd.Series(trend, index=X_clean.index),
+            'cycle': pd.Series(cycle_results['cycle'], index=X_clean.index),
+            'clean_years': X_clean,
+            'clean_data': Y_clean,
+            'future_value': future_value,
+            'trend_results': trend_results,
+            'cycle_results': cycle_results,
+            'plot_data': pd.DataFrame({
+                'time': X_clean,
+                'original': Y_clean,
+                'trend': trend,
+                'cycle': cycle_results['cycle'],
+                'combined': trend + cycle_results['cycle']
+            })
+        }
+
+    def trend_regression(self, X, Y, method='linear'):
+        """
+        Performs trend analysis using specified regression method.
+        """
+        if method == 'linear':
+            results = self.linear_regression(X, Y)
+        elif method == 'polynomial':
+            results = self.polynomial_regression(X, Y)
+        elif method == 'lowess':
+            results = self.lowess_regression(X, Y)
+        elif method == 'gaussian':
+            results = self.gaussian_process_regression(X, Y)
+        else:
+            raise ValueError(f"Unsupported trend method: {method}")
+        
+        return {
+            'plot_data': results['plot_data'],
+            'prediction': results['prediction'],
+            'metrics': {
+                'r2': results['r2'],
+                'rmse': results['rmse'],
+                'mae': results['mae'],
+                'aic': results['aic']
+            }
+        }
+
+    def cyclicality_analysis(self, Y, X, period=None, max_harmonics=3):
+        """
+        Analyzes cyclical component using Fourier decomposition.
+        """
+        X_values = X.values if isinstance(X, pd.Series) else X
+        Y_values = Y.values if isinstance(Y, pd.Series) else Y
+        
+        # Period estimation
+        if period is None:
+            fft = np.fft.fft(Y_values)
+            years_between = np.median(np.diff(X_values))
+            freqs = np.fft.fftfreq(len(X_values), years_between)
+            pos_freq_idx = np.where(freqs > 0)[0]
+            if len(pos_freq_idx) > 0:
+                main_freq_idx = pos_freq_idx[np.argmax(np.abs(fft[pos_freq_idx]))]
+                period = 1 / freqs[main_freq_idx]
+            else:
+                period = len(X_values) / 2
+        
+        omega = 2 * np.pi / period
+        
+        def create_fourier_features(t):
+            """Helper function to ensure consistent feature creation"""
+            features = [np.ones_like(t)]  # Constant term
+            for h in range(1, max_harmonics + 1):
+                features.extend([
+                    np.cos(h * omega * t),
+                    np.sin(h * omega * t)
+                ])
+            return np.column_stack(features)
+        
+        # Training features
+        X_fourier = create_fourier_features(X_values)
+        
+        # Fit model
+        model = OLS(Y_values, X_fourier).fit()
+        cycle = model.predict(X_fourier)
+        
+        # Predict next value
+        future_X = np.array([X_values[-1] + 1])
+        future_fourier = create_fourier_features(future_X)
+        future_pred = model.predict(future_fourier)[0]
+        
+        return {
+            'cycle': cycle,
+            'prediction': future_pred,
+            'period': period,
+            'params': model.params,
+            'metrics': {
+                'r2': model.rsquared,
+                'rmse': np.sqrt(model.mse_resid),
+                'aic': model.aic
+            }
+        }
+
     def linear_regression(self, X, Y, do_cv=True, k_folds=5):
         """
         Performs linear regression with optional cross validation.
@@ -361,33 +495,64 @@ class TimeSeriesRegression:
 
     def polynomial_regression(self, X, Y, degree=2, do_cv=True, k_folds=5):
         """
-        Performs polynomial regression with proper cross-validation handling.
+        Performs polynomial regression.
+        Inputs:
+        X       : yearly time series data 
+        Y       : yearly time series data
+        degree  : polynomial degree
+        do_cv   : whether to perform cross validation
+        k_folds : number of folds for CV
+        
+        Outputs:
+        dict    : {
+            'lag'        : optimal lag value,
+            'prediction' : predicted value for next period,
+            'r2'        : R-squared value,
+            'rmse'      : root mean square error,
+            'mae'       : mean absolute error,
+            'aic'       : Akaike Information Criterion,
+            'plot_data' : pandas DataFrame with X, Y_pred, Y_data columns,
+            'cv_score'  : mean validation score (if do_cv=True),
+            'cv_error'  : std of validation scores (if do_cv=True)
+        }
         """
         # Find optimal lag and align series
         best_lag, _, _ = self.max_lag(X, Y)
         X_aligned, Y_aligned = self.align_with_lag(X, Y, best_lag)
         
+        # Drop NaN values before fitting
+        valid_mask = ~np.isnan(X_aligned) & ~np.isnan(Y_aligned)
+        X_clean = X_aligned[valid_mask].values if hasattr(X_aligned, 'values') else X_aligned[valid_mask]
+        Y_clean = Y_aligned[valid_mask].values if hasattr(Y_aligned, 'values') else Y_aligned[valid_mask]
+        
         # Prepare polynomial features
-        X_array = X_aligned.values.reshape(-1, 1) if hasattr(X_aligned, 'values') else X_aligned.reshape(-1, 1)
+        X_array = X_clean.reshape(-1, 1)
         poly = PolynomialFeatures(degree)
         X_poly = poly.fit_transform(X_array)
         
         # Fit model
-        model = OLS(Y_aligned, X_poly).fit()
+        model = OLS(Y_clean, X_poly).fit()
         
-        # Make prediction
+        # Make prediction for next year
         current_X = X[2024 if 2024 in X.index else X.index.max()]
-        next_year_pred = model.predict(poly.transform([[current_X]]))[0]
+        if np.isnan(current_X):
+            next_year_pred = np.nan
+        else:
+            next_year_pred = model.predict(poly.transform([[current_X]]))[0]
+        
+        # Get predictions for plotting
+        X_plot = X_array
+        Y_pred = model.predict(poly.transform(X_plot))
         
         # Create plot data
         plot_data = pd.DataFrame({
-            'X': X_aligned,
-            'Y_data': Y_aligned,
-            'Y_pred': model.fittedvalues
+            'X': X_aligned[valid_mask],
+            'Y_data': Y_aligned[valid_mask],
+            'Y_pred': Y_pred
         })
         
-        # Calculate standardized metrics
-        metrics = self._calculate_metrics(Y_aligned, model.fittedvalues, n_params=degree + 1)
+        # Calculate metrics
+        metrics = self._calculate_metrics(Y_clean, Y_pred, n_params=degree + 1)
         
         results = {
             "lag": best_lag,
@@ -401,7 +566,10 @@ class TimeSeriesRegression:
         
         if do_cv:
             def poly_model(X, Y):
-                # Handle both pandas Series and numpy array inputs
+                # Drop NaN values
+                valid = ~np.isnan(X) & ~np.isnan(Y)
+                X, Y = X[valid], Y[valid]
+                
                 X = X.reshape(-1, 1)
                 poly_cv = PolynomialFeatures(degree)
                 X_poly_cv = poly_cv.fit_transform(X)
@@ -409,7 +577,13 @@ class TimeSeriesRegression:
                 
                 def predict(X_new):
                     X_new = X_new.reshape(-1, 1)
-                    return model_cv.predict(poly_cv.transform(X_new))
+                    nan_mask = np.isnan(X_new)
+                    predictions = np.full(len(X_new), np.nan)
+                    if not np.all(nan_mask):
+                        predictions[~nan_mask] = model_cv.predict(
+                            poly_cv.transform(X_new[~nan_mask])
+                        )
+                    return predictions
                 
                 return predict
             
@@ -606,21 +780,42 @@ class TimeSeriesRegression:
 
     def gaussian_process_regression(self, X, Y, length_scale=1.0, do_cv=True, k_folds=5):
         """
-        Performs Gaussian Process Regression with RBF kernel and improved stability.
+        Performs Gaussian Process Regression.
+        Inputs:
+        X            : yearly time series data
+        Y            : yearly time series data
+        length_scale : RBF kernel length scale parameter
+        do_cv        : whether to perform cross validation
+        k_folds      : number of folds for CV
+        
+        Outputs:
+        dict    : {
+            'lag'        : optimal lag value,
+            'prediction' : predicted value for next period,
+            'r2'        : R-squared value,
+            'rmse'      : root mean square error,
+            'mae'       : mean absolute error,
+            'aic'       : AIC value,
+            'std'       : prediction standard deviation,
+            'plot_data' : pandas DataFrame with X, Y_pred, Y_data columns,
+            'cv_score'  : mean validation score (if do_cv=True),
+            'cv_error'  : std of validation scores (if do_cv=True)
+        }
         """
-        # Find optimal lag and align series first
+        # Find optimal lag and align series
         best_lag, _, _ = self.max_lag(X, Y)
         X_aligned, Y_aligned = self.align_with_lag(X, Y, best_lag)
         
-        # Input validation
-        if len(X_aligned) < 3:
-            raise ValueError("Need at least 3 data points for GPR")
+        # Drop NaN values before fitting
+        valid_mask = ~np.isnan(X_aligned) & ~np.isnan(Y_aligned)
+        X_clean = X_aligned[valid_mask].values if hasattr(X_aligned, 'values') else X_aligned[valid_mask]
+        Y_clean = Y_aligned[valid_mask].values if hasattr(Y_aligned, 'values') else Y_aligned[valid_mask]
         
-        # Prepare data
-        X_fit = X_aligned.values.reshape(-1, 1)
-        Y_fit = Y_aligned.values.reshape(-1, 1)
+        # Reshape data
+        X_fit = X_clean.reshape(-1, 1)
+        Y_fit = Y_clean.reshape(-1, 1)
         
-        # Robust scaling function
+        # Scale the data
         def robust_scale(data):
             median = np.median(data)
             iqr = np.percentile(data, 75) - np.percentile(data, 25)
@@ -631,64 +826,48 @@ class TimeSeriesRegression:
             scaled = (data - median) / (iqr + 1e-8)
             return scaled, median, iqr
         
-        # Scale the data
         X_scaled, X_median, X_iqr = robust_scale(X_fit)
         Y_scaled, Y_median, Y_iqr = robust_scale(Y_fit)
         
-        # Optimize length scale based on data characteristics
-        avg_X_dist = np.median(np.abs(np.diff(np.sort(X_scaled.ravel()))))
-        length_scale = max(avg_X_dist, 1e-3)
-        
-        # Define kernel
-        kernel = RBF(
-            length_scale=length_scale,
-            length_scale_bounds=(1e-3, 1e3)
-        ) + WhiteKernel(
-            noise_level=0.1,
-            noise_level_bounds=(1e-5, 1.0)
-        )
-        
-        # Initialize GPR
+        # Define kernel and fit model
+        kernel = RBF(length_scale=length_scale) + WhiteKernel(noise_level=0.1)
         gpr = GaussianProcessRegressor(
             kernel=kernel,
             random_state=42,
             n_restarts_optimizer=5,
-            normalize_y=False,
-            alpha=1e-10
+            normalize_y=False
         )
+        gpr.fit(X_scaled, Y_scaled.ravel())
         
-        # Fit model
-        try:
-            gpr.fit(X_scaled, Y_scaled.ravel())
-        except Exception as e:
-            print(f"Warning: Initial fit failed, trying with increased regularization: {str(e)}")
-            gpr.alpha = 1e-6
-            gpr.fit(X_scaled, Y_scaled.ravel())
-        
-        # Prediction function that handles scaling
         def predict_scaled(X_new, scaler_params):
+            if np.all(np.isnan(X_new)):
+                return np.array([np.nan]), np.array([np.nan])
+                
             X_median, X_iqr = scaler_params['X']
             Y_median, Y_iqr = scaler_params['Y']
             
-            X_scaled_new = (X_new - X_median) / (X_iqr + 1e-8)
-            Y_scaled_pred, Y_scaled_std = gpr.predict(X_scaled_new.reshape(-1, 1), return_std=True)
+            X_valid = ~np.isnan(X_new)
+            X_new_valid = X_new[X_valid]
+            X_scaled_new = (X_new_valid - X_median) / (X_iqr + 1e-8)
             
-            # Inverse transform predictions
-            Y_pred = Y_scaled_pred * (Y_iqr + 1e-8) + Y_median
-            Y_std = Y_scaled_std * (Y_iqr + 1e-8)
+            Y_scaled_pred, Y_scaled_std = gpr.predict(
+                X_scaled_new.reshape(-1, 1), 
+                return_std=True
+            )
             
-            return Y_pred, Y_std
+            full_pred = np.full(X_new.shape, np.nan)
+            full_std = np.full(X_new.shape, np.nan)
+            
+            full_pred[X_valid] = Y_scaled_pred * (Y_iqr + 1e-8) + Y_median
+            full_std[X_valid] = Y_scaled_std * (Y_iqr + 1e-8)
+            
+            return full_pred, full_std
         
-        # Current prediction
+        # Make predictions
+        scaler_params = {'X': (X_median, X_iqr), 'Y': (Y_median, Y_iqr)}
         current_X = X[2024 if 2024 in X.index else X.index.max()]
-        scaler_params = {
-            'X': (X_median, X_iqr),
-            'Y': (Y_median, Y_iqr)
-        }
-        next_year_pred, next_year_std = predict_scaled(np.array([[current_X]]), scaler_params)
-        
-        # Get predictions for all points
-        Y_pred, Y_std = predict_scaled(X_fit, scaler_params)
+        next_year_pred, next_year_std = predict_scaled(np.array([current_X]), scaler_params)
+        Y_pred, Y_std = predict_scaled(X_aligned.values, scaler_params)
         
         # Create plot data
         plot_data = pd.DataFrame({
@@ -698,8 +877,13 @@ class TimeSeriesRegression:
             'Y_std': Y_std
         })
         
-        # Calculate metrics
-        metrics = self._calculate_metrics(Y_aligned, Y_pred, n_params=len(gpr.kernel_.theta))
+        # Calculate metrics using only non-NaN values
+        valid_metrics = ~np.isnan(Y_pred) & ~np.isnan(Y_aligned)
+        metrics = self._calculate_metrics(
+            Y_aligned[valid_metrics], 
+            Y_pred[valid_metrics], 
+            n_params=len(gpr.kernel_.theta)
+        )
         
         results = {
             "lag": best_lag,
@@ -714,36 +898,30 @@ class TimeSeriesRegression:
         
         if do_cv:
             def cv_gpr_model(X, Y):
-                # Ensure proper dimensions and scale data
+                valid = ~np.isnan(X) & ~np.isnan(Y)
+                X, Y = X[valid], Y[valid]
+                
                 X = X.reshape(-1, 1)
                 Y = Y.reshape(-1, 1)
-                
-                # Scale training data
                 X_scaled, X_median, X_iqr = robust_scale(X)
                 Y_scaled, Y_median, Y_iqr = robust_scale(Y)
                 
-                # Create new GPR instance
                 cv_gpr = GaussianProcessRegressor(
                     kernel=kernel.clone_with_theta(kernel.theta),
                     random_state=42,
-                    n_restarts_optimizer=5,
-                    normalize_y=False,
-                    alpha=1e-10
+                    normalize_y=False
                 )
+                cv_gpr.fit(X_scaled, Y_scaled.ravel())
                 
-                # Fit model
-                try:
-                    cv_gpr.fit(X_scaled, Y_scaled.ravel())
-                except Exception:
-                    cv_gpr.alpha = 1e-6
-                    cv_gpr.fit(X_scaled, Y_scaled.ravel())
-                
-                # Return prediction function
                 def predict(X_new):
-                    X_new = X_new.reshape(-1, 1)
-                    X_scaled_new = (X_new - X_median) / (X_iqr + 1e-8)
-                    Y_scaled_pred = cv_gpr.predict(X_scaled_new)
-                    return Y_scaled_pred * (Y_iqr + 1e-8) + Y_median
+                    nan_mask = np.isnan(X_new)
+                    predictions = np.full(len(X_new), np.nan)
+                    if not np.all(nan_mask):
+                        X_valid = X_new[~nan_mask].reshape(-1, 1)
+                        X_scaled_new = (X_valid - X_median) / (X_iqr + 1e-8)
+                        Y_scaled_pred = cv_gpr.predict(X_scaled_new)
+                        predictions[~nan_mask] = Y_scaled_pred * (Y_iqr + 1e-8) + Y_median
+                    return predictions
                 
                 return predict
             
@@ -754,7 +932,6 @@ class TimeSeriesRegression:
                 {},
                 k_folds
             )
-            
             results.update({
                 'cv_score': cv_score,
                 'cv_error': cv_error
