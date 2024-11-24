@@ -24,6 +24,7 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 # SciPy
 from scipy import signal
 from scipy.stats import norm
+from scipy.fft import fft, fftfreq, ifft
 
 
 # Suppress specific warnings (optional)
@@ -160,7 +161,7 @@ class PredictiveRegression:
         valid_indices = X_aligned.notna() & Y_aligned.notna()
         return X_aligned[valid_indices], Y_aligned[valid_indices]
 
-    def max_lag(self, X, Y, max_lag_years=10):
+    def max_lag(self, X, Y, max_lag_years=6):
         """
         Finds the lag that maximizes correlation between two time series.
         
@@ -306,124 +307,162 @@ class PredictiveRegression:
     
     def time_series_regression(self, X, Y, trend_method='linear', period=None, max_harmonics=3):
         """
-        Decomposes time series into trend and cyclical components.
+        Decomposes time series into trend and cyclical components with prediction through 2024.
         X: pd.Series or array of years
         Y: pd.Series or array of values
+        trend_method: str, regression method ('linear', 'polynomial', 'lowess', 'gaussian', 'arima')
+        period: int or None, forced period for cyclical component
+        max_harmonics: int, maximum number of harmonics for cyclical analysis
         """
-        if not isinstance(X, pd.Series):
-            X = pd.Series(X)
-        if not isinstance(Y, pd.Series):
-            Y = pd.Series(Y)
+        X = pd.Series(X) if not isinstance(X, pd.Series) else X.copy()
+        Y = pd.Series(Y) if not isinstance(Y, pd.Series) else Y.copy()
         
+        # Get clean data
         X_clean, Y_clean = self.clean_series(X, Y)
+        n_clean = len(X_clean)
         
-        trend_results = self.trend_regression(X_clean, Y_clean, method=trend_method)
-        trend = trend_results['plot_data']['Y_pred']
-        detrended = Y_clean - trend
-        
-        cycle_results = self.cyclicality_analysis(detrended, X_clean, period, max_harmonics)
-        
-        last_year = X_clean.max()
-        if last_year < 2024:
-            future_value = trend_results['prediction'] + cycle_results['prediction']
+        # Create extended range maintaining original values
+        if X_clean.max() < 2024:
+            future_x = np.arange(X_clean.max() + 1, 2025)
+            X_extended = np.concatenate([X_clean.values, future_x])
         else:
-            future_value = None
+            X_extended = X_clean.values
+        
+        # Get trend components
+        trend_results = self.trend_regression(X_extended, Y_clean.values, method=trend_method)
+        trend = trend_results['plot_data']['Y_pred']
+        
+        # Detrend using only historical data
+        detrended = Y_clean.values - trend[:n_clean]
+        
+        # Get cycle components for full range
+        cycle_results = self.cyclicality_analysis(detrended, X_extended, period, max_harmonics)
+        cycle = cycle_results['cycle']
+        
+        # Ensure trend and cycle have same length
+        n_total = len(X_extended)
+        trend = trend[:n_total]
+        cycle = cycle[:n_total]
+        
+        # Combine predictions
+        predictions = trend + cycle
+        future_predictions = predictions[n_clean:]
         
         return {
-            'trend': pd.Series(trend, index=X_clean.index),
-            'cycle': pd.Series(cycle_results['cycle'], index=X_clean.index),
+            'trend': pd.Series(trend, index=X_extended),
+            'cycle': pd.Series(cycle, index=X_extended),
             'clean_years': X_clean,
             'clean_data': Y_clean,
-            'future_value': future_value,
+            'future_predictions': pd.Series(future_predictions, index=X_extended[n_clean:]),
             'trend_results': trend_results,
             'cycle_results': cycle_results,
             'plot_data': pd.DataFrame({
-                'time': X_clean,
-                'original': Y_clean,
+                'time': X_extended,
+                'original': np.concatenate([Y_clean.values, np.full(len(X_extended) - n_clean, np.nan)]),
                 'trend': trend,
-                'cycle': cycle_results['cycle'],
-                'combined': trend + cycle_results['cycle']
+                'cycle': cycle,
+                'combined': predictions
             })
         }
 
     def trend_regression(self, X, Y, method='linear'):
         """
-        Performs trend analysis using specified regression method.
+        Performs trend analysis through 2024 using specified regression method.
+        X: array-like of years
+        Y: array-like of values
+        method: str, regression method ('linear', 'polynomial', 'lowess', 'gaussian', 'arima')
         """
+        X = np.asarray(X)
+        Y = np.asarray(Y)
+        n_hist = len(Y)  # Length of historical data
+        
         if method == 'linear':
-            results = self.linear_regression(X, Y)
+            results = self.linear_regression(X[:n_hist], Y)
         elif method == 'polynomial':
-            results = self.polynomial_regression(X, Y)
+            results = self.polynomial_regression(X[:n_hist], Y)
         elif method == 'lowess':
-            results = self.lowess_regression(X, Y)
+            results = self.lowess_regression(X[:n_hist], Y)
         elif method == 'gaussian':
-            results = self.gaussian_process_regression(X, Y)
+            results = self.gaussian_process_regression(X[:n_hist], Y)
+        elif method == 'arima':
+            results = self.arima_regression(X[:n_hist], Y)
         else:
             raise ValueError(f"Unsupported trend method: {method}")
         
+        # Get predictions for full range
+        plot_data = results['plot_data']
+        if X.max() > plot_data['X'].max():
+            if method == 'linear':
+                future_pred = results['model'].predict(add_constant(X[n_hist:]))
+            elif method == 'polynomial':
+                future_pred = results['model'].predict(results['poly'].transform(X[n_hist:].reshape(-1, 1)))
+            elif method == 'arima':
+                future_pred = results['model'].forecast(steps=len(X) - n_hist, exog=X[n_hist:].reshape(-1, 1))
+            elif method in ['lowess', 'gaussian']:
+                future_pred = np.interp(X[n_hist:], plot_data['X'], plot_data['Y_pred'])
+            
+            # Combine historical and future predictions
+            plot_data = pd.DataFrame({
+                'X': X,
+                'Y_data': np.concatenate([Y, np.full(len(X) - n_hist, np.nan)]),
+                'Y_pred': np.concatenate([plot_data['Y_pred'], future_pred])
+            })
+        
         return {
-            'plot_data': results['plot_data'],
+            'plot_data': plot_data,
             'prediction': results['prediction'],
             'metrics': {
                 'r2': results['r2'],
                 'rmse': results['rmse'],
                 'mae': results['mae'],
                 'aic': results['aic']
-            }
+            },
+            'model': results.get('model', None),
+            'poly': results.get('poly', None)
         }
 
     def cyclicality_analysis(self, Y, X, period=None, max_harmonics=3):
         """
-        Analyzes cyclical component using Fourier decomposition.
+        Analyzes cyclical component with prediction through 2024.
+        Y: array-like of detrended values
+        X: array-like of years
+        period: forced period length or None for automatic detection
+        max_harmonics: maximum number of harmonics to consider
         """
-        X_values = X.values if isinstance(X, pd.Series) else X
-        Y_values = Y.values if isinstance(Y, pd.Series) else Y
+        Y = np.asarray(Y)
+        X = np.asarray(X)
         
-        # Period estimation
-        if period is None:
-            fft = np.fft.fft(Y_values)
-            years_between = np.median(np.diff(X_values))
-            freqs = np.fft.fftfreq(len(X_values), years_between)
-            pos_freq_idx = np.where(freqs > 0)[0]
-            if len(pos_freq_idx) > 0:
-                main_freq_idx = pos_freq_idx[np.argmax(np.abs(fft[pos_freq_idx]))]
-                period = 1 / freqs[main_freq_idx]
-            else:
-                period = len(X_values) / 2
+        # Get FFT results from actual data
+        Y_clean = Y[~np.isnan(Y)]
+        fft_result = fft(Y_clean)
+        T = len(Y_clean)
+        freq = fftfreq(T, d=1)
         
-        omega = 2 * np.pi / period
+        # Basic reconstruction for original period
+        cycle_orig = np.real(ifft(fft_result))
         
-        def create_fourier_features(t):
-            """Helper function to ensure consistent feature creation"""
-            features = [np.ones_like(t)]  # Constant term
-            for h in range(1, max_harmonics + 1):
-                features.extend([
-                    np.cos(h * omega * t),
-                    np.sin(h * omega * t)
-                ])
-            return np.column_stack(features)
+        # Create extended cycle for full range
+        n_total = len(X)
+        if n_total > T:
+            n_repeats = int(np.ceil((n_total - T) / T))
+            extended_cycle = np.tile(cycle_orig, n_repeats + 1)[:n_total]
+        else:
+            extended_cycle = cycle_orig[:n_total]
         
-        # Training features
-        X_fourier = create_fourier_features(X_values)
-        
-        # Fit model
-        model = OLS(Y_values, X_fourier).fit()
-        cycle = model.predict(X_fourier)
-        
-        # Predict next value
-        future_X = np.array([X_values[-1] + 1])
-        future_fourier = create_fourier_features(future_X)
-        future_pred = model.predict(future_fourier)[0]
+        # Calculate metrics on original data
+        residuals = Y_clean - cycle_orig
+        mse = np.mean(residuals**2)
+        rmse = np.sqrt(mse)
+        r2 = 1 - np.sum(residuals**2) / np.sum((Y_clean - np.mean(Y_clean))**2)
         
         return {
-            'cycle': cycle,
-            'prediction': future_pred,
-            'period': period,
-            'params': model.params,
+            'cycle': extended_cycle,
+            'prediction': extended_cycle[-1] if len(extended_cycle) > 0 else None,
+            'period': None,
             'metrics': {
-                'r2': model.rsquared,
-                'rmse': np.sqrt(model.mse_resid),
-                'aic': model.aic
+                'r2': r2,
+                'rmse': rmse,
+                'aic': T * np.log(mse) + 2
             }
         }
 
