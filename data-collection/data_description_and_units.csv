@@ -1,0 +1,3 @@
+faculty,NSF_awards,inflation_rate,Fed_Budget,PA_Budget_diff,GDP,Labor_BS,Labor_cond,Unemploy_BS,Unemploy
+# of faculty in a given year,Total amount of NSF awards in a given year,"Inflation rate, average consumer prices, annual percent change",Federal budget for postsecondary education in a given year,The difference between the president's proposed budget and the actual fedral budget in a given year ,Nominal GDP,"Labor Force Participation Rate - Bachelor's Degree and Higher, 25 Yrs. & over","KC Fed Labor Market Conditions Index, Level of Activity Indicator ","Unemployment Rate - Bachelor's Degree and Higher, 25 Yrs. & over",Unemployment Rate
+faculty,Million $,%,Million $,Million $,Million $,%,1,%,%
