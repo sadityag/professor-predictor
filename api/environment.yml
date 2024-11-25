@@ -1,4 +1,4 @@
-name: erdos_fall_2024
+name: environment
 channels:
   - conda-forge
   - defaults
@@ -259,4 +259,4 @@ dependencies:
       - seaborn==0.13.2
       - tenacity==9.0.0
       - ucimlrepo==0.0.7
-prefix: /opt/anaconda3/envs/erdos_fall_2024
+prefix: /opt/anaconda3/envs/environment
