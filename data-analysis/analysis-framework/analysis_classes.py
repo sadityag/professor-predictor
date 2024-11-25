@@ -673,23 +673,30 @@ class PredictiveRegression:
         
         if do_cv:
             def poly_model(X, Y):
-                # Drop NaN values
-                valid = ~np.isnan(X) & ~np.isnan(Y)
-                X, Y = X[valid], Y[valid]
+                # Ensure X and Y are numpy arrays
+                X = np.asarray(X).reshape(-1)
+                Y = np.asarray(Y).reshape(-1)
                 
-                X = X.reshape(-1, 1)
+                # Remove NaN values
+                valid_mask = ~np.isnan(X) & ~np.isnan(Y)
+                X_valid = X[valid_mask].reshape(-1, 1)
+                Y_valid = Y[valid_mask]
+                
+                # Fit polynomial features
                 poly_cv = PolynomialFeatures(degree)
-                X_poly_cv = poly_cv.fit_transform(X)
-                model_cv = OLS(Y, X_poly_cv).fit()
+                X_poly_cv = poly_cv.fit_transform(X_valid)
+                model_cv = OLS(Y_valid, X_poly_cv).fit()
                 
                 def predict(X_new):
-                    X_new = X_new.reshape(-1, 1)
-                    nan_mask = np.isnan(X_new)
-                    predictions = np.full(len(X_new), np.nan)
-                    if not np.all(nan_mask):
-                        predictions[~nan_mask] = model_cv.predict(
-                            poly_cv.transform(X_new[~nan_mask])
-                        )
+                    X_new = np.asarray(X_new).reshape(-1)
+                    predictions = np.full(X_new.shape, np.nan)
+                    valid_mask = ~np.isnan(X_new)
+                    
+                    if np.any(valid_mask):
+                        X_valid = X_new[valid_mask].reshape(-1, 1)
+                        X_poly_pred = poly_cv.transform(X_valid)
+                        predictions[valid_mask] = model_cv.predict(X_poly_pred)
+                    
                     return predictions
                 
                 return predict
@@ -920,7 +927,7 @@ class PredictiveRegression:
         
         # Reshape data
         X_fit = X_clean.reshape(-1, 1)
-        Y_fit = Y_clean.reshape(-1, 1)
+        Y_fit = Y_clean.reshape(-1)
         
         # Scale the data
         def robust_scale(data):
@@ -944,9 +951,10 @@ class PredictiveRegression:
             n_restarts_optimizer=5,
             normalize_y=False
         )
-        gpr.fit(X_scaled, Y_scaled.ravel())
+        gpr.fit(X_scaled, Y_scaled)
         
         def predict_scaled(X_new, scaler_params):
+            X_new = np.asarray(X_new).reshape(-1)
             if np.all(np.isnan(X_new)):
                 return np.array([np.nan]), np.array([np.nan])
                 
@@ -1005,29 +1013,37 @@ class PredictiveRegression:
         
         if do_cv:
             def cv_gpr_model(X, Y):
-                valid = ~np.isnan(X) & ~np.isnan(Y)
-                X, Y = X[valid], Y[valid]
+                # Ensure X and Y are numpy arrays
+                X = np.asarray(X).reshape(-1)
+                Y = np.asarray(Y).reshape(-1)
                 
-                X = X.reshape(-1, 1)
-                Y = Y.reshape(-1, 1)
-                X_scaled, X_median, X_iqr = robust_scale(X)
-                Y_scaled, Y_median, Y_iqr = robust_scale(Y)
+                # Remove NaN values
+                valid_mask = ~np.isnan(X) & ~np.isnan(Y)
+                X_valid = X[valid_mask].reshape(-1, 1)
+                Y_valid = Y[valid_mask]
+                
+                # Scale the data
+                X_scaled, X_median, X_iqr = robust_scale(X_valid)
+                Y_scaled, Y_median, Y_iqr = robust_scale(Y_valid)
                 
                 cv_gpr = GaussianProcessRegressor(
                     kernel=kernel.clone_with_theta(kernel.theta),
                     random_state=42,
                     normalize_y=False
                 )
-                cv_gpr.fit(X_scaled, Y_scaled.ravel())
+                cv_gpr.fit(X_scaled.reshape(-1, 1), Y_scaled)
                 
                 def predict(X_new):
-                    nan_mask = np.isnan(X_new)
-                    predictions = np.full(len(X_new), np.nan)
-                    if not np.all(nan_mask):
-                        X_valid = X_new[~nan_mask].reshape(-1, 1)
-                        X_scaled_new = (X_valid - X_median) / (X_iqr + 1e-8)
-                        Y_scaled_pred = cv_gpr.predict(X_scaled_new)
-                        predictions[~nan_mask] = Y_scaled_pred * (Y_iqr + 1e-8) + Y_median
+                    X_new = np.asarray(X_new).reshape(-1)
+                    predictions = np.full(X_new.shape, np.nan)
+                    valid_mask = ~np.isnan(X_new)
+                    
+                    if np.any(valid_mask):
+                        X_valid = X_new[valid_mask]
+                        X_scaled = (X_valid - X_median) / (X_iqr + 1e-8)
+                        Y_scaled_pred = cv_gpr.predict(X_scaled.reshape(-1, 1))
+                        predictions[valid_mask] = Y_scaled_pred * (Y_iqr + 1e-8) + Y_median
+                    
                     return predictions
                 
                 return predict
