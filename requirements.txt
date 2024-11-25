@@ -1,1 +1,12 @@
 sklearn
+streamlit
+numpy
+pandas
+plotly
+importlib
+typing
+itertools
+warnings
+statsmodels
+statsmodels
+scipy
