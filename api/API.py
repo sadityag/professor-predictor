@@ -52,7 +52,7 @@ NSF_dict = dict(
 
 # Additional input metadata dictionaries
 Infl_dict = dict(display='Inflation Rate', display_lower='inflation rate', display_upper_lower='Inflation rate',
-                 units='(%)', type=float, key='Infl_Rate')
+                 units='(%)', type=float, key='inflation_rate')
 Fed_dict = dict(display='Federal Budget', display_lower='federal budget', display_upper_lower='Federal budget',
                 units='(Billions of Dollars)', type=float, key='Fed_Budget')
 PA_dict = dict(display='PA Budget Difference', display_lower='PA budget difference',
@@ -77,7 +77,7 @@ fac_dict = dict(
     display_upper_lower='Number of faculty positions',
     units='',
     type=int,
-    key='Number_Faculty'
+    key='faculty'
 )
 
 # Organize input and output metadata
@@ -266,18 +266,18 @@ else:
         results = tsr.time_series_regression(df[selected_input['key']], df[selected_output['key']])
 
     # Prepare data for plotting the results
-    plot_data = results['plot_data'].sort_values(by='X')
+    plot_data = results['plot_data'].sort_values(by='time')
     plot_data_long = pd.melt(
-        plot_data, id_vars=['X'], value_vars=['Y_data', 'Y_pred'],
+        plot_data, id_vars=['time'], value_vars=['Y_data', 'Y_pred','trend'],
         var_name='Line', value_name='Y'
     )
 
     # Generate a line plot for data and predictions
     fig = px.line(
-        plot_data_long, x='X', y='Y', color='Line',
-        title=f"{selected_output['display_upper_lower']} vs. {selected_input['display_lower']}",
+        plot_data_long, x='time', y='Y', color='Line',
+        title=f"{selected_output['display_upper_lower']} over time",
         labels={
-            'X': f"{selected_input['display']} {selected_input['units']}",
+            'time': f"{selected_input['display']} {selected_input['units']}",
             'Y': selected_output['display'],
             'Line': ''
         }
@@ -286,24 +286,36 @@ else:
     # Update the legend names for the plot
     display_name_mapping = {
         'Y_data': 'Data',
-        'Y_pred': 'Model Prediction'
+        'Y_pred': 'Model Prediction',
+        'trend' : 'Trend',
     }
     fig.for_each_trace(lambda t: t.update(name=display_name_mapping[t.name]))
     st.plotly_chart(fig)
     st.divider()
 
-    # Residual plot
-    plot_data['Residual'] = plot_data['Y_data'] - plot_data['Y_pred']
+    # Cycle plot
     fig = px.line(
-        plot_data, x='X', y='Residual',
-        title=f"Residual {selected_output['display_lower']} vs. {selected_input['display_lower']}",
+        plot_data, x='time', y='cycle',
+        title=f"Cycle of {selected_output['display_lower']}",
         labels={
-            'X': f"{selected_input['display']} {selected_input['units']}",
-            'Residual': f"Residual {selected_output['display']}",
+            'time': f"{selected_input['display']} {selected_input['units']}",
+            'cycle': f"{selected_output['display']} - Trend",
             'Line': ''
         }
     )
     st.plotly_chart(fig)
     st.divider()
+    # Display summary statistics
+    st.subheader("Summary Statistics")
+    del results['plot_data']  # Exclude plot data from summary statistics
+    display_results = {
+        display_stats_mapping.get(old_key, old_key): value
+        for old_key, value in results.items()
+    }
+
+    # Display rounded statistics
+    for key in display_results.keys():
+        if not math.isnan(round_sigfigs(display_results[key], 3)):
+            st.markdown(f"{key}: {round_sigfigs(display_results[key], 3)}")
 
 
