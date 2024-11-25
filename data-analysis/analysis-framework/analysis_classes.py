@@ -305,165 +305,233 @@ class PredictiveRegression:
             print(f"Error in cross-validation: {str(e)}")
             return np.nan, np.nan
     
-    def time_series_regression(self, X, Y, trend_method='linear', period=None, max_harmonics=3):
+    def time_series_regression(self, X, Y, method='linear', do_cv=True, k_folds=5):
         """
-        Decomposes time series into trend and cyclical components with prediction through 2024.
-        X: pd.Series or array of years
-        Y: pd.Series or array of values
-        trend_method: str, regression method ('linear', 'polynomial', 'lowess', 'gaussian', 'arima')
-        period: int or None, forced period for cyclical component
-        max_harmonics: int, maximum number of harmonics for cyclical analysis
-        """
-        X = pd.Series(X) if not isinstance(X, pd.Series) else X.copy()
-        Y = pd.Series(Y) if not isinstance(Y, pd.Series) else Y.copy()
+        Performs time series regression with trend and cyclical components.
+        Cross validation is performed only on the trend component.
         
-        # Get clean data
+        Args:
+            X (pd.DataFrame): Years data
+            Y (pd.Series): Time series data
+            method (str): Regression method ('linear', 'polynomial', 'lowess', 'arima', 'gaussian_process')
+            do_cv (bool): Whether to perform cross-validation
+            k_folds (int): Number of folds for cross-validation
+        """
+        # Convert X to yearly format and handle errors
+        try:
+            X = pd.Series(X) if not isinstance(X, pd.Series) else X
+            Y = pd.Series(Y) if not isinstance(Y, pd.Series) else Y
+        except Exception as e:
+            raise ValueError(f"Could not convert input data to pandas Series: {str(e)}")
+        
+        # Clean and align the data
         X_clean, Y_clean = self.clean_series(X, Y)
-        n_clean = len(X_clean)
         
-        # Create extended range maintaining original values
-        if X_clean.max() < 2024:
-            future_x = np.arange(X_clean.max() + 1, 2025)
-            X_extended = np.concatenate([X_clean.values, future_x])
+        if len(X_clean) < 2 * k_folds:
+            raise ValueError(f"Insufficient data points ({len(X_clean)}) for {k_folds}-fold cross-validation")
+        
+        # Initialize storage for cross-validation
+        cv_scores = []
+        
+        if do_cv:
+            tscv = TimeSeriesSplit(n_splits=k_folds)
+            for train_idx, test_idx in tscv.split(X_clean):
+                # Split data
+                X_train = X_clean.iloc[train_idx]
+                Y_train = Y_clean.iloc[train_idx]
+                X_test = X_clean.iloc[test_idx]
+                Y_test = Y_clean.iloc[test_idx]
+                
+                if len(X_train) < 4:  # Minimum required for meaningful analysis
+                    continue
+                    
+                # Get trend
+                try:
+                    trend_results = self.trend_regression(X_train, Y_train, X_test, method)
+                    # Calculate fold score on trend only
+                    score = r2_score(Y_test, trend_results['prediction'])
+                    if not np.isnan(score):
+                        cv_scores.append(score)
+                except Exception as e:
+                    print(f"Warning: Error in fold: {str(e)}")
+                    continue
+        
+        # Fit on full dataset and predict through 2025
+        future_years = pd.Series(np.arange(float(X_clean.iloc[-1]) + 1, 2026),
+                            index=range(len(X_clean), len(X_clean) + int(2025 - X_clean.iloc[-1])))
+        
+        # Get final trend
+        trend_results = self.trend_regression(X_clean, Y_clean, future_years, method)
+        
+        # Get cyclical component for the complete series
+        Y_detrended = Y_clean - trend_results['fitted_values']
+        cycle_results = self.cyclicality_analysis(Y_detrended, X_clean, future_years)
+        
+        # Combine final predictions
+        Y_pred = trend_results['fitted_values'] + cycle_results['fitted_values']
+        final_predictions = trend_results['prediction'] + cycle_results['prediction']
+        
+        # Create plot data with aligned indices
+        all_times = pd.concat([X_clean, future_years])
+        plot_data = pd.DataFrame({
+            'time': all_times,
+            'Y_data': pd.concat([Y_clean, pd.Series(index=future_years.index, dtype=float)]),
+            'trend': pd.concat([trend_results['fitted_values'], trend_results['prediction']]),
+            'cycle': pd.concat([cycle_results['fitted_values'], cycle_results['prediction']]),
+            'Y_pred': pd.concat([Y_pred, final_predictions])
+        })
+        
+        # Calculate metrics for complete model
+        metrics = self._calculate_metrics(Y_clean, Y_pred)
+        
+        # Calculate effective parameters based on method
+        if method == 'linear':
+            effective_params = 2
+        elif method == 'polynomial':
+            effective_params = 3
+        elif method == 'arima':
+            effective_params = 3
         else:
-            X_extended = X_clean.values
+            effective_params = int(len(X_clean) * 0.1)  # 10% of data points for non-parametric methods
         
-        # Get trend components
-        trend_results = self.trend_regression(X_extended, Y_clean.values, method=trend_method)
-        trend = trend_results['plot_data']['Y_pred']
-        
-        # Detrend using only historical data
-        detrended = Y_clean.values - trend[:n_clean]
-        
-        # Get cycle components for full range
-        cycle_results = self.cyclicality_analysis(detrended, X_extended, period, max_harmonics)
-        cycle = cycle_results['cycle']
-        
-        # Ensure trend and cycle have same length
-        n_total = len(X_extended)
-        trend = trend[:n_total]
-        cycle = cycle[:n_total]
-        
-        # Combine predictions
-        predictions = trend + cycle
-        future_predictions = predictions[n_clean:]
-        
-        return {
-            'trend': pd.Series(trend, index=X_extended),
-            'cycle': pd.Series(cycle, index=X_extended),
-            'clean_years': X_clean,
-            'clean_data': Y_clean,
-            'future_predictions': pd.Series(future_predictions, index=X_extended[n_clean:]),
-            'trend_results': trend_results,
-            'cycle_results': cycle_results,
-            'plot_data': pd.DataFrame({
-                'time': X_extended,
-                'original': np.concatenate([Y_clean.values, np.full(len(X_extended) - n_clean, np.nan)]),
-                'trend': trend,
-                'cycle': cycle,
-                'combined': predictions
-            })
+        results = {
+            'prediction': float(final_predictions.iloc[-1]),
+            'r2': metrics['r2'],
+            'rmse': metrics['rmse'],
+            'mae': metrics['mae'],
+            'aic': self._calculate_non_parametric_aic(Y_clean, Y_pred, effective_params),
+            'plot_data': plot_data
         }
+        
+        if do_cv and cv_scores:
+            results.update({
+                'cv_score': np.mean(cv_scores),
+                'cv_error': np.std(cv_scores)
+            })
+        
+        return results
 
-    def trend_regression(self, X, Y, method='linear'):
+    def trend_regression(self, X_train, Y_train, X_pred, method='linear'):
         """
-        Performs trend analysis through 2024 using specified regression method.
-        X: array-like of years
-        Y: array-like of values
-        method: str, regression method ('linear', 'polynomial', 'lowess', 'gaussian', 'arima')
+        Performs trend regression using specified method.
+        
+        Args:
+            X_train (pd.Series): Training years
+            Y_train (pd.Series): Training data
+            X_pred (pd.Series): Prediction years
+            method (str): Regression method
         """
-        X = np.asarray(X)
-        Y = np.asarray(Y)
-        n_hist = len(Y)  # Length of historical data
+        # Scale X values with error handling
+        scaler = StandardScaler()
+        try:
+            X_train_scaled = scaler.fit_transform(X_train.values.reshape(-1, 1))
+            X_pred_scaled = scaler.transform(X_pred.values.reshape(-1, 1))
+        except Exception as e:
+            raise ValueError(f"Error scaling data: {str(e)}")
         
         if method == 'linear':
-            results = self.linear_regression(X[:n_hist], Y)
-        elif method == 'polynomial':
-            results = self.polynomial_regression(X[:n_hist], Y)
-        elif method == 'lowess':
-            results = self.lowess_regression(X[:n_hist], Y)
-        elif method == 'gaussian':
-            results = self.gaussian_process_regression(X[:n_hist], Y)
-        elif method == 'arima':
-            results = self.arima_regression(X[:n_hist], Y)
-        else:
-            raise ValueError(f"Unsupported trend method: {method}")
+            X_const = add_constant(X_train_scaled)
+            model = OLS(Y_train, X_const).fit()
+            fitted_values = model.predict(X_const)
+            X_pred_const = add_constant(X_pred_scaled)
+            predictions = model.predict(X_pred_const)
         
-        # Get predictions for full range
-        plot_data = results['plot_data']
-        if X.max() > plot_data['X'].max():
-            if method == 'linear':
-                future_pred = results['model'].predict(add_constant(X[n_hist:]))
-            elif method == 'polynomial':
-                future_pred = results['model'].predict(results['poly'].transform(X[n_hist:].reshape(-1, 1)))
-            elif method == 'arima':
-                future_pred = results['model'].forecast(steps=len(X) - n_hist, exog=X[n_hist:].reshape(-1, 1))
-            elif method in ['lowess', 'gaussian']:
-                future_pred = np.interp(X[n_hist:], plot_data['X'], plot_data['Y_pred'])
+        elif method == 'polynomial':
+            poly = PolynomialFeatures(degree=2)
+            X_poly_train = poly.fit_transform(X_train_scaled)
+            X_poly_pred = poly.transform(X_pred_scaled)
+            model = OLS(Y_train, X_poly_train).fit()
+            fitted_values = model.predict(X_poly_train)
+            predictions = model.predict(X_poly_pred)
+        
+        elif method == 'lowess':
+            lowess_fit = lowess(Y_train, X_train_scaled.ravel(), frac=0.3)
+            fitted_values = np.interp(X_train_scaled.ravel(), lowess_fit[:, 0], lowess_fit[:, 1])
+            predictions = np.interp(X_pred_scaled.ravel(), lowess_fit[:, 0], lowess_fit[:, 1])
+        
+        elif method == 'gaussian_process':
+            kernel = RBF(length_scale=1.0) + WhiteKernel(noise_level=0.1)
+            model = GaussianProcessRegressor(kernel=kernel, random_state=42)
+            model.fit(X_train_scaled, Y_train)
+            fitted_values = model.predict(X_train_scaled)
+            predictions = model.predict(X_pred_scaled)
+        
+        elif method == 'arima':
+            # Determine ARIMA order based on data length
+            if len(X_train) < 10:
+                order = (1,0,0)
+            else:
+                order = (1,1,1)
             
-            # Combine historical and future predictions
-            plot_data = pd.DataFrame({
-                'X': X,
-                'Y_data': np.concatenate([Y, np.full(len(X) - n_hist, np.nan)]),
-                'Y_pred': np.concatenate([plot_data['Y_pred'], future_pred])
-            })
+            try:
+                model = ARIMA(Y_train, order=order, exog=X_train_scaled)
+                fitted_model = model.fit()
+                fitted_values = fitted_model.fittedvalues
+                predictions = fitted_model.forecast(steps=len(X_pred), exog=X_pred_scaled)
+            except Exception as e:
+                print(f"ARIMA failed, falling back to linear regression: {str(e)}")
+                X_const = add_constant(X_train_scaled)
+                model = OLS(Y_train, X_const).fit()
+                fitted_values = model.predict(X_const)
+                X_pred_const = add_constant(X_pred_scaled)
+                predictions = model.predict(X_pred_const)
         
         return {
-            'plot_data': plot_data,
-            'prediction': results['prediction'],
-            'metrics': {
-                'r2': results['r2'],
-                'rmse': results['rmse'],
-                'mae': results['mae'],
-                'aic': results['aic']
-            },
-            'model': results.get('model', None),
-            'poly': results.get('poly', None)
+            'fitted_values': pd.Series(fitted_values, index=X_train.index),
+            'prediction': pd.Series(predictions, index=X_pred.index)
         }
 
-    def cyclicality_analysis(self, Y, X, period=None, max_harmonics=3):
+    def cyclicality_analysis(self, Y_detrended, X_train, X_pred):
         """
-        Analyzes cyclical component with prediction through 2024.
-        Y: array-like of detrended values
-        X: array-like of years
-        period: forced period length or None for automatic detection
-        max_harmonics: maximum number of harmonics to consider
+        Analyzes cyclical component using FFT.
+        
+        Args:
+            Y_detrended (pd.Series): Detrended time series data
+            X_train (pd.Series): Training years
+            X_pred (pd.Series): Prediction years
         """
-        Y = np.asarray(Y)
-        X = np.asarray(X)
+        # Convert to numpy array for FFT
+        Y_values = Y_detrended.values.astype(float)
         
-        # Get FFT results from actual data
-        Y_clean = Y[~np.isnan(Y)]
-        fft_result = fft(Y_clean)
-        T = len(Y_clean)
-        freq = fftfreq(T, d=1)
+        # Perform FFT
+        fft_result = fft(Y_values)
+        freqs = fftfreq(len(Y_values))
         
-        # Basic reconstruction for original period
-        cycle_orig = np.real(ifft(fft_result))
+        # Get dominant frequencies (excluding DC component)
+        power_spectrum = np.abs(fft_result) ** 2
         
-        # Create extended cycle for full range
-        n_total = len(X)
-        if n_total > T:
-            n_repeats = int(np.ceil((n_total - T) / T))
-            extended_cycle = np.tile(cycle_orig, n_repeats + 1)[:n_total]
-        else:
-            extended_cycle = cycle_orig[:n_total]
+        # Limit frequency analysis to meaningful periods
+        min_period = 2  # minimum 2-year cycle
+        max_period = len(Y_values) // 2  # maximum half the length of data
+        valid_freq_mask = (np.abs(freqs) >= 1/max_period) & (np.abs(freqs) <= 1/min_period)
+        valid_freq_mask[0] = False  # exclude DC component
         
-        # Calculate metrics on original data
-        residuals = Y_clean - cycle_orig
-        mse = np.mean(residuals**2)
-        rmse = np.sqrt(mse)
-        r2 = 1 - np.sum(residuals**2) / np.sum((Y_clean - np.mean(Y_clean))**2)
+        # Find top frequencies
+        n_freqs = min(3, sum(valid_freq_mask) // 2)  # up to 3 frequencies, but no more than half of valid ones
+        sorted_freq_idx = np.argsort(power_spectrum * valid_freq_mask)[-n_freqs:]
+        
+        dom_freqs = freqs[sorted_freq_idx]
+        dom_amplitudes = np.abs(fft_result[sorted_freq_idx]) / len(Y_values)
+        dom_phases = np.angle(fft_result[sorted_freq_idx])
+        
+        # Reconstruct signal using dominant frequencies
+        def reconstruct_signal(t):
+            signal = np.zeros_like(t, dtype=float)
+            for freq, amp, phase in zip(dom_freqs, dom_amplitudes, dom_phases):
+                signal += 2 * amp * np.cos(2 * np.pi * freq * t + phase)
+            return signal
+        
+        # Generate time points
+        t_train = np.arange(len(Y_values))
+        t_pred = np.arange(len(Y_values), len(Y_values) + len(X_pred))
+        
+        # Generate fitted values and predictions
+        fitted_values = reconstruct_signal(t_train)
+        predictions = reconstruct_signal(t_pred)
         
         return {
-            'cycle': extended_cycle,
-            'prediction': extended_cycle[-1] if len(extended_cycle) > 0 else None,
-            'period': None,
-            'metrics': {
-                'r2': r2,
-                'rmse': rmse,
-                'aic': T * np.log(mse) + 2
-            }
+            'fitted_values': pd.Series(fitted_values, index=X_train.index),
+            'prediction': pd.Series(predictions, index=X_pred.index)
         }
 
     def linear_regression(self, X, Y, do_cv=True, k_folds=5):
