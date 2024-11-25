@@ -8,5 +8,4 @@ typing
 itertools
 warnings
 statsmodels
-statsmodels
 scipy
