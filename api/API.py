@@ -29,7 +29,7 @@ def round_sigfigs(value, sig_figs):
 
 
 # Load data
-df = pd.read_csv('../data-collection/data_interpolated.csv')
+df = pd.read_csv('data_interpolated.csv')
 
 # Define metadata dictionaries for inputs and outputs
 year_dict = dict(
