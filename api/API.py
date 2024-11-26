@@ -42,33 +42,33 @@ year_dict = dict(
 )
 
 NSF_dict = dict(
-    display='Number of NSF Awards',
-    display_lower='number of NSF awards',
-    display_upper_lower='Number of NSF awards',
-    units='',
+    display='Amount of NSF Awards',
+    display_lower='amount of NSF awards',
+    display_upper_lower='Amount of NSF awards',
+    units='(Millions of Dollars)',
     type=int,
     key='NSF_awards'
 )
 
 # Additional input metadata dictionaries
-Infl_dict = dict(display='Inflation Rate', display_lower='inflation rate', display_upper_lower='Inflation rate',
+Infl_dict = dict(display='Inflation Rate (Average Consumer Price Annual Percent Change)', display_lower='inflation rate', display_upper_lower='Inflation rate',
                  units='(%)', type=float, key='inflation_rate')
-Fed_dict = dict(display='Federal Budget', display_lower='federal budget', display_upper_lower='Federal budget',
-                units='(Billions of Dollars)', type=float, key='Fed_Budget')
-PA_dict = dict(display='PA Budget Difference', display_lower='PA budget difference',
-               display_upper_lower='PA budget difference', units='(Millions of Dollars)', type=int, key='PA_Budget_diff')
-GDP_dict = dict(display='Gross Domestic Product (GDP)', display_lower='gross domestic product',
-                display_upper_lower='Gross domestic product', units='(Billions of Dollars)', type=float, key='GDP')
+Fed_dict = dict(display='Federal Budget for Postsecondary Education', display_lower='federal budget', display_upper_lower='Federal budget',
+                units='(Millions of Dollars)', type=float, key='Fed_Budget')
+PA_dict = dict(display="Difference Between President's Proposed Budget and Actual Federal Budget", display_lower='budget difference',
+               display_upper_lower='Budget difference', units='(Millions of Dollars)', type=int, key='PA_Budget_diff')
+GDP_dict = dict(display='Nominal Gross Domestic Product (GDP)', display_lower='GDP',
+                display_upper_lower='GDP', units='(Millions of Dollars)', type=float, key='GDP')
 CPI_dict = dict(display='Consumer Price Index (CPI)', display_lower='consumer price index',
                 display_upper_lower='Consumer price index', units='', type=float, key='CPI_inflation')
-LaborBS_dict = dict(display='Labor BS', display_lower='labor BS', display_upper_lower='Labor BS',
-                    units='(?)', type=float, key='Labor_BS')
-LaborC_dict = dict(display='Labor Cond', display_lower='labor cond', display_upper_lower='Labor cond',
-                   units='(?)', type=float, key='Labor_cond')
-UnemployBS_dict = dict(display='Unemployment BS', display_lower='unemployment BS',
-                       display_upper_lower='Unemployment BS', units='(?)', type=float, key='Unemploy_BS')
-Unemploy_dict = dict(display='Unemployment', display_lower='unemployment',
-                     display_upper_lower='Unemployment', units='(?)', type=float, key='Unemploy')
+LaborBS_dict = dict(display="Labor Force Participation Rate (Bachelor's Degree or Higher, 25 Years & Older)", display_lower='paticipation rate', display_upper_lower='participation rate',
+                    units='(%)', type=float, key='Labor_BS')
+LaborC_dict = dict(display='Kansas City Federal Labor Market Conditions Index (Level of Activity Indicator)', display_lower='market conditions index', display_upper_lower='Market conditions index',
+                   units='', type=float, key='Labor_cond')
+UnemployBS_dict = dict(display="Unemployment Rate (Bachelor's Degree or Higher, 25 Years & Older)", display_lower='unemployment rate',
+                       display_upper_lower='Unemployment rate', units='(%)', type=float, key='Unemploy_BS')
+Unemploy_dict = dict(display='Unemployment Rate', display_lower='unemployment rate',
+                     display_upper_lower='Unemployment rate', units='(%)', type=float, key='Unemploy')
 
 # Output metadata dictionary
 fac_dict = dict(
@@ -128,7 +128,13 @@ if selected_input['display'] != "Year":
     # Plot the selected input and output over time
     fig = px.line(df, x='year', y=selected_input['key'],
                   title=f"{selected_input['display_upper_lower']} over time",
-                  labels={'year': 'Year', selected_input['key']: f"{selected_input['display']} {selected_input['units']}"})
+                  labels={'year': 'Year', selected_input['key']: f"{selected_input['display_upper_lower']} {selected_input['units']}"})
+    st.plotly_chart(fig)
+    st.divider()
+
+    fig = px.line(df, x='year', y=selected_output['key'],
+                  title=f"{selected_output['display_upper_lower']} over time",
+                  labels={'year': 'Year', selected_output['key']: f"{selected_output['display_upper_lower']} {selected_output['units']}"})
     st.plotly_chart(fig)
     st.divider()
 
@@ -253,11 +259,8 @@ if selected_input['display'] != "Year":
 else:
     # Special case: Time series analysis for "Year" input
     analysis_techniques = ["Time Series Regression"]
-    analysis_choice = st.selectbox(
-        'Which type of analysis would you like to perform?',
-        analysis_techniques
-    )
-
+    analysis_choice = "Time Series Regression"
+    "Performing time series regression."
     # Initialize the predictive regression class
     tsr = analysis.PredictiveRegression()
 
