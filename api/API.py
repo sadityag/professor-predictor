@@ -8,7 +8,7 @@ import math
 from importlib.machinery import SourceFileLoader
 
 # Load external analysis module
-analysis = SourceFileLoader("analysis_classes", "../data-analysis/analysis-framework/analysis_classes.py").load_module()
+import analysis_classes as analysis
 
 # Utility function: Round a number to a given number of significant figures
 def round_sigfigs(value, sig_figs):
