@@ -2,10 +2,8 @@ streamlit
 numpy
 pandas
 plotly
-importlib
-typing
-itertools
-warnings
 statsmodels
 scipy
 scikit-learn
+importlib
+typing
