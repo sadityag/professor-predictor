@@ -937,8 +937,8 @@ class PredictiveRegression:
                 iqr = np.std(data)
             if iqr == 0:
                 iqr = 1.0
-            scaled = (data - median) / (iqr + 1e-8)
-            return scaled, median, iqr
+            rescaled = (data - median) / (iqr + 1e-8)
+            return rescaled, median, iqr
         
         X_scaled, X_median, X_iqr = robust_scale(X_fit)
         Y_scaled, Y_median, Y_iqr = robust_scale(Y_fit)
