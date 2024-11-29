@@ -189,18 +189,24 @@ if selected_input['display'] != "Year":
 
     # Initialize the predictive regression class
     tsr = analysis.PredictiveRegression()
-
+    "Choose your model parameters."
     # Perform the selected analysis
     if analysis_choice == 'Locally Weighted Scatterplot Smoothing (LOWESS)':
-        results = tsr.lowess_regression(df[selected_input['key']], df[selected_output['key']])
+        choice = st.slider("Select sample fraction.", 2.0/len(df[selected_input['key']]), 1.0, 0.3)
+        results = tsr.lowess_regression(df[selected_input['key']], df[selected_output['key']], frac=choice)
     elif analysis_choice == "Autoregressive Integrated Moving Average (ARIMA)":
-        results = tsr.arima_regression(df[selected_input['key']], df[selected_output['key']])
+        maxp = st.slider("Select maximum order (number of time lags).", 1, 5, 3)
+        maxd = st.slider("Select maximum degree of differencing (number of times the data have had past values subtracted).", 1, 5, 2)
+        maxq = st.slider("Select maximum order of the moving-average mode.", 1, 5, 3)
+        results = tsr.arima_regression(df[selected_input['key']], df[selected_output['key']],max_p=maxp, max_d=maxd, max_q=maxq)
     elif analysis_choice == "Polynomial Regression":
-        results = tsr.polynomial_regression(df[selected_input['key']], df[selected_output['key']])
+        choice = st.slider("Select polynomial degree.", 3, 10, 3)
+        results = tsr.polynomial_regression(df[selected_input['key']], df[selected_output['key']],degree=choice)
     elif analysis_choice == "Linear Regression":
         results = tsr.linear_regression(df[selected_input['key']], df[selected_output['key']])
     elif analysis_choice == "Gaussian Process Regression":
-        results = tsr.gaussian_process_regression(df[selected_input['key']], df[selected_output['key']])
+        choice = st.slider("Select length scale.", 1.0, 10.0, 1.0)
+        results = tsr.gaussian_process_regression(df[selected_input['key']], df[selected_output['key']],length_scale=choice)
 
     # Prepare data for plotting the results
     plot_data = results['plot_data'].sort_values(by='X')
