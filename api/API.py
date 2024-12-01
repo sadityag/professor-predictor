@@ -83,7 +83,7 @@ fac_dict = dict(
 # Organize input and output metadata
 inputs = dict(
     year=year_dict,
-    NSF=NSF_dict,
+    #NSF=NSF_dict,
     Infl=Infl_dict,
     fed=Fed_dict,
     PA=PA_dict,
